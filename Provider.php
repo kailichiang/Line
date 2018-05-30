@@ -84,11 +84,11 @@ class Provider extends AbstractProvider implements ProviderInterface
     protected function mapUserToObject(array $user)
     {
         return (new User())->setRaw($user)->map([
-            'id'       => $user['userId'],
+            'id'       => $user['userId'] ?? $user['sub'] ?? null,
             'nickname' => null,
-            'name'     => $user['displayName'],
-            'email'    => null,
-            'avatar'   => array_key_exists('pictureUrl', $user) ? $user['pictureUrl'] : null,
+            'name'     => $user['displayName'] ?? $user['name'] ?? null,
+            'avatar'   => $user['pictureUrl'] ?? $user['picture'] ?? null,
+            'email'    => $user['email'] ?? null,
         ]);
     }
 
@@ -104,5 +104,36 @@ class Provider extends AbstractProvider implements ProviderInterface
         return array_merge(parent::getTokenFields($code), [
             'grant_type' => 'authorization_code',
         ]);
+    }
+
+    /**
+     * @return \SocialiteProviders\Manager\OAuth2\User
+     */
+    public function user()
+    {
+        if ($this->hasInvalidState()) {
+            throw new InvalidStateException();
+        }
+
+        $response = $this->getAccessTokenResponse($this->getCode());
+
+        if( $jwt = $response['id_token'] ?? null ) {
+            list($headb64, $bodyb64, $cryptob64) = explode('.', $jwt);
+            $user = $this->mapUserToObject( json_decode(base64_decode($bodyb64), true) );
+        } else {
+            $user = $this->mapUserToObject($this->getUserByToken(
+                $token = $this->parseAccessToken($response)
+            ));
+        }
+
+        $this->credentialsResponseBody = $response;
+
+        if ($user instanceof User) {
+            $user->setAccessTokenResponseBody($this->credentialsResponseBody);
+        }
+
+        return $user->setToken($this->parseAccessToken($response))
+                    ->setRefreshToken($this->parseRefreshToken($response))
+                    ->setExpiresIn($this->parseExpiresIn($response));
     }
 }
